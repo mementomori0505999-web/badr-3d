@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#111a20">
+<title>Бадр — интерактивная историческая реконструкция</title>
+<style>
+:root{--bg:#10171b;--panel:#172329;--ink:#f4ead8;--muted:#b8c2c1;--gold:#d8b77a;--blue:#74a9d8;--red:#d88970;--line:#34434a}
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+#app{height:100dvh;display:grid;grid-template-rows:auto 1fr auto;max-width:1100px;margin:auto}
+header{padding:12px 15px 9px;border-bottom:1px solid var(--line);background:#111a20;z-index:2}
+h1{font:600 clamp(21px,4vw,31px)/1.15 Georgia,serif;margin:0 0 5px}header p{margin:0;color:var(--muted);font-size:12px}
+#view{position:relative;min-height:220px;overflow:hidden;background:linear-gradient(#283641,#c49b6b)}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:absolute;left:10px;right:10px;top:10px;display:flex;gap:6px;flex-wrap:wrap;pointer-events:none}
+.pill{background:#10171bdc;border:1px solid #617078;border-radius:99px;padding:5px 9px;font-size:11px;color:#f7ecd8}
+#help{position:absolute;bottom:10px;left:10px;background:#10171bdc;border:1px solid #617078;border-radius:10px;padding:8px 10px;font-size:11px;max-width:75%;color:#f7ecd8}
+#panel{max-height:42dvh;overflow:auto;background:var(--panel);border-top:1px solid var(--line);padding:12px 14px calc(12px + env(safe-area-inset-bottom))}
+.tabs{display:flex;gap:6px;overflow:auto;padding-bottom:9px}
+button{font:inherit;color:var(--ink);background:#26373f;border:1px solid #465961;border-radius:10px;padding:9px 11px;white-space:nowrap;cursor:pointer}
+button.active{background:#6e5936;border-color:var(--gold)}button:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+#content h2{font:600 18px Georgia,serif;margin:4px 0 8px}#content p{margin:6px 0;color:#e1e6e2;font-size:13px}#content .muted{color:var(--muted)}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;margin:8px 0}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+a{color:#a9d0f4} .notice{border-left:3px solid var(--gold);padding:7px 9px;background:#202e33;margin-top:8px;font-size:12px;color:#e6dfd1}
+.controls{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+@media(min-width:760px){#app{height:100dvh;grid-template-columns:1.5fr 1fr;grid-template-rows:auto 1fr}header{grid-column:1/3}#view{grid-column:1;grid-row:2}#panel{grid-column:2;grid-row:2;max-height:none;border-top:0;border-left:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div id="app">
+<header><h1>Бадр: интерактивная реконструкция</h1><p>2 год хиджры · 624 г. · визуальная модель без изображений лиц · источники отделены от реконструкции</p></header>
+<section id="view" aria-label="Интерактивная 3D-сцена">
+ <div class="hud"><span class="pill">Перетащите — вращать</span><span class="pill">Сведите пальцы — масштаб</span><span class="pill">Условная схема, не археологический план</span></div>
+ <div id="help">Сцена схематична: рельеф, колодец и позиции условны. Нажмите этап внизу, чтобы увидеть пояснение.</div>
+</section>
+<section id="panel">
+ <nav class="tabs" aria-label="Разделы">
+  <button class="active" data-tab="scene">Поле боя</button><button data-tab="timeline">Ход событий</button><button data-tab="sunnah">Коран и Сунна</button><button data-tab="method">Что известно?</button>
+ </nav>
+ <div id="content"></div>
+ <div class="controls"><button id="reset">Сбросить вид</button><button id="labels">Скрыть подписи</button><button id="toggle">Показать условные позиции</button></div>
+</section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const host=document.querySelector('#view');
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x9c9b8b); scene.fog=new THREE.Fog(0xb8a080,45,125);
+const camera=new THREE.PerspectiveCamera(48,1,.1,250); camera.position.set(30,26,38);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;host.appendChild(renderer.domElement);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.target.set(0,0,0);controls.maxPolarAngle=Math.PI*.48;controls.minDistance=12;controls.maxDistance=85;
+scene.add(new THREE.HemisphereLight(0xffe8c4,0x55402d,2.0));
+const sun=new THREE.DirectionalLight(0xffedcf,2.2);sun.position.set(-25,40,15);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);scene.add(sun);
+const mat=(color,roughness=1)=>new THREE.MeshStandardMaterial({color,roughness});
+const sand=mat(0xc9a36f), sand2=mat(0xb88e5d), rock=mat(0x75614d), darkrock=mat(0x514b43), cloth=mat(0x8e7958), blue=mat(0x4f82b4), red=mat(0xa84f3b), wood=mat(0x62452c), water=mat(0x447d91,.35);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(180,180,40,40),sand);ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+// subtly uneven terrain with small dunes
+for(let i=0;i<90;i++){const r=1.5+Math.random()*5;const m=new THREE.Mesh(new THREE.SphereGeometry(r,8,6),i%3? sand:sand2);m.scale.y=.12+Math.random()*.12;m.position.set((Math.random()-.5)*110,-.15,(Math.random()-.5)*100);m.receiveShadow=true;m.castShadow=true;scene.add(m)}
+function hill(x,z,sx,sy,sz,material=rock){const m=new THREE.Mesh(new THREE.DodecahedronGeometry(1,2),material);m.position.set(x,sy*.35,z);m.scale.set(sx,sy,sz);m.rotation.y=Math.random()*2;m.castShadow=true;m.receiveShadow=true;scene.add(m)}
+for(let i=0;i<13;i++)hill(-48+i*7,-31-Math.random()*10,4+Math.random()*5,3+Math.random()*5,4+Math.random()*5,i%3?rock:darkrock);
+for(let i=0;i<8;i++)hill(42+i*5,30+Math.random()*8,5,3+Math.random()*3,5,rock);
+// water well / marker
+const well=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.7,.35,24),wood);well.position.set(-4,.2,-2);well.castShadow=true;scene.add(well);
+const pool=new THREE.Mesh(new THREE.CircleGeometry(1.75,24),water);pool.rotation.x=-Math.PI/2;pool.position.set(-4,.39,-2);scene.add(pool);
+function makeLabel(text,color='#fff1d5'){const c=document.createElement('canvas');c.width=512;c.height=100;const ctx=c.getContext('2d');ctx.fillStyle='rgba(16,23,27,.82)';ctx.beginPath();ctx.roundRect(4,4,504,92,20);ctx.fill();ctx.strokeStyle=color;ctx.lineWidth=4;ctx.stroke();ctx.fillStyle=color;ctx.font='bold 35px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,52);const tex=new THREE.CanvasTexture(c);const s=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthTest:false}));s.scale.set(9,1.75,1);return s}
+const labels=[];function label(t,x,y,z,color){const s=makeLabel(t,color);s.position.set(x,y,z);scene.add(s);labels.push(s);return s}
+label('Колодец (условный)',-4,4,-2,'#9bd5e5');label('Мусульмане (схема)',-18,5,9,'#9ccaff');label('Курайшиты (схема)',21,5,-9,'#ffb3a0');label('Возвышенность',-34,8,-30,'#f1d3a0');
+function warrior(x,z,color,scale=1,dir=0){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.CylinderGeometry(.22*scale,.34*scale,.95*scale,7),color);body.position.y=.75*scale;body.castShadow=true;g.add(body);const head=new THREE.Mesh(new THREE.SphereGeometry(.22*scale,8,6),cloth);head.position.y=1.36*scale;g.add(head);const turban=new THREE.Mesh(new THREE.TorusGeometry(.21*scale,.07*scale,5,8),cloth);turban.position.y=1.4*scale;turban.rotation.x=Math.PI/2;g.add(turban);const shield=new THREE.Mesh(new THREE.CircleGeometry(.36*scale,8),wood);shield.position.set(.3*scale,.8*scale,.15*scale);shield.rotation.y=-.3;g.add(shield);const spear=new THREE.Mesh(new THREE.CylinderGeometry(.025*scale,.025*scale,1.5*scale,5),wood);spear.position.set(-.3*scale,1.15*scale,0);spear.rotation.z=-.12;g.add(spear);g.position.set(x,0,z);g.rotation.y=dir;g.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true}});scene.add(g);return g}
+const muslims=[],quraysh=[];
+for(let i=0;i<42;i++){let x=-23+Math.random()*12,z=4+Math.random()*18;muslims.push(warrior(x,z,blue,.65+Math.random()*.3,Math.PI*.1))}
+for(let i=0;i<65;i++){let x=14+Math.random()*20,z=-15+Math.random()*25;quraysh.push(warrior(x,z,red,.65+Math.random()*.35,-Math.PI*.2))}
+function camel(x,z){const g=new THREE.Group();const body=new THREE.Mesh(new THREE.CapsuleGeometry(.55,.9,4,8),mat(0xa47c4c));body.rotation.z=Math.PI/2;body.position.y=.85;g.add(body);const neck=new THREE.Mesh(new THREE.CylinderGeometry(.15,.23,.9,7),mat(0xa47c4c));neck.position.set(.45,1.25,0);neck.rotation.z=-.35;g.add(neck);for(const dx of [-.35,.35])for(const dz of [-.25,.25]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.07,.09,.65,6),mat(0x80603d));leg.position.set(dx,.35,dz);g.add(leg)}g.position.set(x,0,z);g.traverse(o=>{if(o.isMesh)o.castShadow=true});scene.add(g)}
+for(let i=0;i<8;i++)camel(-25+Math.random()*50, -20+Math.random()*42);
+const arrows=[];
+function arrow(from,to,color){const d=new THREE.Vector3(to[0]-from[0],0,to[1]-from[1]);const a=new THREE.ArrowHelper(d.clone().normalize(),new THREE.Vector3(from[0],.3,from[1]),d.length(),color,1.5,1);scene.add(a);arrows.push(a)}
+arrow([-14,8],[2,4],0x4f82b4);arrow([19,-7],[4,-1],0xa84f3b);arrow([20,5],[3,3],0xa84f3b);
+let showPositions=true,showLabels=true,tab='scene',stage=0;
+const content=document.querySelector('#content');
+const stages=[
+['Выход из Медины','Мусульмане выступили навстречу каравану; затем ситуация переросла в столкновение с мекканским войском. Подробная тактическая расстановка в этой модели условна.'],
+['Позиции у Бадра','Источники сообщают о местности Бадр и колодцах. Точная геометрия лагерей и траектории отрядов здесь не реконструируются как установленный факт.'],
+['Мольба Посланника ﷺ','В достоверном хадисе описана настойчивая мольба Пророка ﷺ о помощи. Сцена не изображает его самого и не реконструирует его внешний вид.'],
+['Сражение и исход','Коран связывает исход с помощью Аллаха. Исторические детали отдельных схваток и точные движения бойцов в сцене условны.']];
+const sources=`<h2>Коран и достоверная Сунна</h2>
+<p><b>Коран 3:123:</b> «Аллах уже оказал вам помощь при Бадре, когда вы были слабыми». Это ключевой коранический ориентир для понимания события.</p>
+<p><b>Коран 8:9–12:</b> говорится о мольбе верующих и помощи Аллаха. Реконструкция не пытается визуально изображать ангелов.</p>
+<p><b>Сахих аль-Бухари, хадис 3953</b> (нумерация может отличаться по изданиям): передана мольба Посланника ﷺ в день Бадра.</p>
+<p><b>Сахих аль-Бухари, хадис 3986</b>: сообщение о 70 погибших и 70 пленённых из числа противника.</p>
+<p class="muted">Проверяемые тексты: <a href="https://sunnah.com/bukhari:3953" target="_blank" rel="noopener">Бухари 3953</a> · <a href="https://sunnah.com/bukhari:3986" target="_blank" rel="noopener">Бухари 3986</a> · <a href="https://quran.com/3/123" target="_blank" rel="noopener">Коран 3:123</a> · <a href="https://quran.com/8/9-12" target="_blank" rel="noopener">Коран 8:9–12</a></p>
+<div class="notice">Аяты и хадисы здесь приведены как ориентиры для изучения, а не как попытка исчерпывающе передать все предания. Перед публикацией цитат для урока сверяйте арабский текст и перевод с выбранным изданием.</div>`;
+function render(){document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+if(tab==='scene'){content.innerHTML=`<h2>Поле боя</h2><p>Условная диорама западноаравийского ландшафта: песчаная долина, возвышенности, вода, пехота и верблюды. Все фигуры без прорисованных лиц; они не являются портретами конкретных сподвижников.</p><div class="legend"><span><i class="dot" style="background:#4f82b4"></i>Мусульмане — условный маркер</span><span><i class="dot" style="background:#a84f3b"></i>Курайшиты — условный маркер</span></div><p class="muted">Выберите этап:</p><div class="controls">${stages.map((s,i)=>`<button data-stage="${i}" class="${stage===i?'active':''}">${i+1}. ${s[0]}</button>`).join('')}</div><p>${stages[stage][1]}</p>`}
+else if(tab==='timeline'){content.innerHTML=`<h2>Последовательность событий</h2>${stages.map((s,i)=>`<p><b>${i+1}. ${s[0]}.</b> ${s[1]}</p>`).join('')}<div class="notice">Событийная последовательность опирается на общие сообщения о Бадре; визуальные координаты и расположение фигур не выдаются за точную реконструкцию.</div>`}
+else if(tab==='sunnah'){content.innerHTML=sources}
+else{content.innerHTML=`<h2>Граница между источником и реконструкцией</h2><p><b>Подтверждается источниками:</b> битва при Бадре, её значение, мольба Посланника ﷺ, помощь Аллаха в кораническом повествовании, исход с пленными и погибшими в хадисных сообщениях.</p><p><b>Художественные допущения:</b> точный вид ландшафта, масштаб холмов, расположение отдельных воинов, число фигур в 3D-сцене, оттенки одежды, вооружение каждой модели и стрелки движения.</p><p><b>Принцип уважительного изображения:</b> не изображать лицо Пророка ﷺ или сподвижников; не подписывать случайные 3D-фигуры именами исторических личностей; не изображать религиозные события как документально снятую сцену.</p><div class="notice">Это учебная визуализация, а не археологическая карта и не утверждение, что известна точная расстановка сил.</div>`}
+content.querySelectorAll('[data-stage]').forEach(b=>b.addEventListener('click',()=>{stage=Number(b.dataset.stage);render();document.querySelector('#help').textContent=stages[stage][1]}))}
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{tab=b.dataset.tab;render()}));
+document.querySelector('#reset').addEventListener('click',()=>{camera.position.set(30,26,38);controls.target.set(0,0,0);controls.update()});
+document.querySelector('#labels').addEventListener('click',e=>{showLabels=!showLabels;labels.forEach(x=>x.visible=showLabels);e.target.textContent=showLabels?'Скрыть подписи':'Показать подписи'});
+document.querySelector('#toggle').addEventListener('click',e=>{showPositions=!showPositions;[...muslims,...quraysh,...arrows].forEach(x=>x.visible=showPositions);e.target.textContent=showPositions?'Скрыть условные позиции':'Показать условные позиции'});
+function resize(){const w=host.clientWidth,h=host.clientHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h,false)}
+new ResizeObserver(resize).observe(host);resize();render();
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
+</script>
+</body>
+</html>
