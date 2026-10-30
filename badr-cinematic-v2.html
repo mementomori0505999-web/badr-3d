@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#242a2d">
+<title>Бадр — интерактивная историческая реконструкция</title>
+<style>
+:root{color-scheme:dark;--bg:#151a20;--panel:#222a31;--text:#f8ead5;--muted:#c9c0b1}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,sans-serif}#app{max-width:1100px;margin:auto;padding:14px}header{padding:8px 2px 14px}h1{font-size:clamp(1.5rem,5vw,2.25rem);line-height:1.15;margin:0 0 8px}header p,.muted{color:var(--muted)}header p{margin:0}#view{height:min(68vh,620px);min-height:310px;position:relative;overflow:hidden;border:1px solid #74665a;border-radius:14px;background:linear-gradient(#8d7770,#c69a70 62%,#b88b60);touch-action:pan-y;box-shadow:0 14px 38px #0006}#view canvas{display:block;width:100%;height:100%;touch-action:none}.hud{position:absolute;z-index:2;top:10px;left:10px;right:10px;display:flex;flex-wrap:wrap;gap:6px;pointer-events:none}.pill{font-size:12px;padding:5px 8px;border-radius:999px;background:#111d21d9;color:#fff1d5}#help{position:absolute;z-index:2;left:10px;right:10px;bottom:10px;background:#111d21d9;color:#fff1d5;padding:8px 10px;border-radius:10px;font-size:13px;pointer-events:none}#status{display:none;margin:10px 0;padding:12px;border:1px solid #c58a55;border-radius:10px;background:#382d23;color:#ffe0b6;overflow-wrap:anywhere}#panel{margin-top:14px;padding:12px;background:var(--panel);border-radius:14px}.tabs,.controls,.stage-controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}button{font:inherit;color:var(--text);background:#354146;border:1px solid #657176;border-radius:10px;padding:9px 12px;min-height:42px;cursor:pointer}button.active{background:#765c3c;border-color:#e0b77e}#content h2{font-size:1.25rem;margin:.2rem 0 .65rem}#content p{margin:.55rem 0}.legend{display:flex;flex-wrap:wrap;gap:12px;margin:10px 0}.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px}.notice{padding:10px;border-left:3px solid #c9a36f;background:#30383b;border-radius:4px;margin-top:10px}a{color:#a9d4ff}@media(max-width:520px){#app{padding:10px}#view{height:55vh;min-height:280px}.pill{font-size:11px}button{padding:8px 10px}}
+</style>
+</head>
+<body><div id="app">
+<header><h1>Бадр: интерактивная реконструкция</h1><p>2 год хиджры · 624 г. · визуальная модель без изображений лиц · источники отделены от реконструкции</p></header>
+<section id="view" aria-label="Интерактивная 3D-сцена"><div class="hud"><span class="pill">Проведите пальцем — вращать</span><span class="pill">Два пальца — масштаб</span><span class="pill">Художественная схема, не точная карта</span></div><div id="help">Рассвет над долиной Бадра…</div></section>
+<div id="status" role="status"></div>
+<section id="panel"><nav class="tabs" aria-label="Разделы"><button class="active" data-tab="scene">Поле боя</button><button data-tab="timeline">Ход событий</button><button data-tab="sunnah">Коран и Сунна</button><button data-tab="method">Что известно?</button></nav><div id="content"></div><div class="controls"><button id="reset">Сбросить вид</button><button id="labels">Скрыть подписи</button><button id="toggle">Скрыть условные позиции</button><button id="play">Запустить движение</button><button id="topview">Вид сверху</button></div></section>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(function(){
+'use strict';
+const view=document.querySelector('#view'),statusBox=document.querySelector('#status'),help=document.querySelector('#help'),content=document.querySelector('#content');
+const tabs=[...document.querySelectorAll('[data-tab]')],resetButton=document.querySelector('#reset'),labelsButton=document.querySelector('#labels'),toggleButton=document.querySelector('#toggle'),playButton=document.querySelector('#play'),topButton=document.querySelector('#topview');
+let scene,camera,renderer,controls,labels=[],muslims=[],quraysh=[],arrows=[],positionsVisible=true,labelsVisible=true,tab='scene',stage=0,playing=false,unitProgress=0,dust=null,initialMuslims=[],initialQuraysh=[];
+const stages=[
+['Подход к Бадру','Стороны направлялись к району Бадра. Точные координаты и расстановка отдельных людей в этой схеме условны.'],
+['Вода и расположение','Вода имела значение для лагерей. Положение колодца в диораме условно и не является археологическим планом.'],
+['Сражение','Источники описывают сражение и его исход; расположение фигур и стрелки движения придуманы для наглядности.'],
+['Итог','В исламских источниках Бадр занимает важное место. Визуальная модель не изображает конкретных сподвижников.']
+];
+const sources=`<h2>Коран и Сунна</h2><p><b>Коран 3:123:</b> «Аллах уже оказал вам помощь при Бадре, когда вы были слабыми». Это ключевой коранический ориентир для понимания события.</p><p><b>Коран 8:9–12:</b> говорится о мольбе верующих и помощи Аллаха. Реконструкция не пытается визуально изображать ангелов.</p><p><b>Сахих аль-Бухари, хадис 3953</b> (нумерация может отличаться по изданиям): передана мольба Посланника ﷺ в день Бадра.</p><p><b>Сахих аль-Бухари, хадис 3986:</b> сообщение о 70 погибших и 70 пленённых из числа противника.</p><p class="muted">Проверяемые тексты: <a href="https://sunnah.com/bukhari:3953" target="_blank" rel="noopener noreferrer">Бухари 3953</a> · <a href="https://sunnah.com/bukhari:3986" target="_blank" rel="noopener noreferrer">Бухари 3986</a> · <a href="https://quran.com/3/123" target="_blank" rel="noopener noreferrer">Коран 3:123</a> · <a href="https://quran.com/8/9-12" target="_blank" rel="noopener noreferrer">Коран 8:9–12</a></p><div class="notice">Аяты и хадисы приведены как ориентиры для изучения, а не как исчерпывающее изложение преданий. Перед публикацией для урока сверяйте арабский текст и перевод с выбранным изданием.</div>`;
+function renderContent(){
+ tabs.forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+ if(tab==='scene')content.innerHTML=`<h2>Поле боя</h2><p>Условная диорама западноаравийского ландшафта: песчаная долина, возвышенности, вода, условные фигуры и верблюды. Фигуры не имеют прорисованных лиц и не являются портретами конкретных сподвижников.</p><div class="legend"><span><i class="dot" style="background:#4f82b4"></i>Мусульмане — условный маркер</span><span><i class="dot" style="background:#a84f3b"></i>Курайшиты — условный маркер</span></div><p class="muted">Выберите этап:</p><div class="stage-controls">${stages.map((s,i)=>`<button data-stage="${i}" class="${stage===i?'active':''}">${i+1}. ${s[0]}</button>`).join('')}</div><p>${stages[stage][1]}</p>`;
+ else if(tab==='timeline')content.innerHTML=`<h2>Последовательность событий</h2>${stages.map((s,i)=>`<p><b>${i+1}. ${s[0]}.</b> ${s[1]}</p>`).join('')}<div class="notice">Последовательность опирается на общие сообщения о Бадре; визуальные координаты и расположение фигур не выдаются за точную реконструкцию.</div>`;
+ else if(tab==='sunnah')content.innerHTML=sources;
+ else content.innerHTML=`<h2>Граница между источником и реконструкцией</h2><p><b>Подтверждается источниками:</b> битва при Бадре, её значение, мольба Посланника ﷺ, помощь Аллаха в кораническом повествовании, исход с пленными и погибшими в хадисных сообщениях.</p><p><b>Художественные допущения:</b> точный вид ландшафта, масштаб холмов, расположение воинов, число фигур в 3D-сцене, оттенки одежды, вооружение каждой модели и стрелки движения.</p><p><b>Принцип уважительного изображения:</b> не изображать лицо Пророка ﷺ или сподвижников; не подписывать случайные 3D-фигуры именами исторических личностей.</p><div class="notice">Это учебная визуализация, а не археологическая карта и не утверждение, что известна точная расстановка сил.</div>`;
+ content.querySelectorAll('[data-stage]').forEach(b=>b.addEventListener('click',()=>{stage=Number(b.dataset.stage);renderContent();help.textContent=stages[stage][1]}));
+}
+tabs.forEach(b=>b.addEventListener('click',()=>{tab=b.dataset.tab;renderContent()}));
+function showError(message){statusBox.style.display='block';statusBox.textContent='Не удалось запустить 3D-сцену. Причина: '+message+' Обновите страницу и проверьте подключение к интернету. Исторические разделы доступны ниже.'}
+function mat(color,roughness=1){return new THREE.MeshStandardMaterial({color,roughness})}
+function addLabel(text,x,y,z,color){
+ const c=document.createElement('canvas');c.width=512;c.height=100;const ctx=c.getContext('2d');if(!ctx)return;
+ ctx.fillStyle='rgba(16,23,27,.82)';ctx.fillRect(4,4,504,92);ctx.strokeStyle=color;ctx.lineWidth=4;ctx.strokeRect(4,4,504,92);ctx.fillStyle=color;ctx.font='bold 35px system-ui';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,256,52);
+ const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false}));sprite.scale.set(9,1.75,1);sprite.position.set(x,y,z);scene.add(sprite);labels.push(sprite);
+}
+function warrior(x,z,color,cloth,wood,scale=1,dir=0){
+ const g=new THREE.Group(),body=new THREE.Mesh(new THREE.CylinderGeometry(.22*scale,.34*scale,.95*scale,7),color);body.position.y=.75*scale;g.add(body);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.22*scale,8,6),cloth);head.position.y=1.36*scale;g.add(head);
+ const turban=new THREE.Mesh(new THREE.TorusGeometry(.21*scale,.07*scale,5,8),cloth);turban.position.y=1.4*scale;turban.rotation.x=Math.PI/2;g.add(turban);
+ const shield=new THREE.Mesh(new THREE.CircleGeometry(.36*scale,8),wood);shield.position.set(.3*scale,.8*scale,.15*scale);shield.rotation.y=-.3;g.add(shield);
+ const spear=new THREE.Mesh(new THREE.CylinderGeometry(.025*scale,.025*scale,1.5*scale,5),wood);spear.position.set(-.3*scale,1.15*scale,0);spear.rotation.z=-.12;g.add(spear);
+ g.position.set(x,0,z);g.rotation.y=dir;g.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true}});scene.add(g);return g;
+}
+function buildScene(){
+ scene=new THREE.Scene();scene.background=new THREE.Color(0xb58b79);scene.fog=new THREE.Fog(0xc49a78,58,138);
+ camera=new THREE.PerspectiveCamera(48,1,.1,250);camera.position.set(30,26,38);
+ renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;view.insertBefore(renderer.domElement,help);
+ controls=new THREE.OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.target.set(0,0,0);controls.maxPolarAngle=Math.PI*.48;controls.minDistance=12;controls.maxDistance=85;
+ scene.add(new THREE.HemisphereLight(0xffdfc0,0x55402d,1.75));const sun=new THREE.DirectionalLight(0xffc58f,2.65);sun.position.set(-34,28,-18);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);sun.shadow.camera.left=-65;sun.shadow.camera.right=65;sun.shadow.camera.top=65;sun.shadow.camera.bottom=-65;scene.add(sun);
+ const sand=mat(0xc9a36f),sand2=mat(0xb88e5d),rock=mat(0x75614d),darkrock=mat(0x514b43),cloth=mat(0x8e7958),blue=mat(0x4f82b4),red=mat(0xa84f3b),wood=mat(0x62452c),water=mat(0x447d91,.35);
+ const ground=new THREE.Mesh(new THREE.PlaneGeometry(180,180,24,24),sand);ground.rotation.x=-Math.PI/2;ground.receiveShadow=true;scene.add(ground);
+ for(let i=0;i<65;i++){const r=1.5+Math.random()*4,m=new THREE.Mesh(new THREE.SphereGeometry(r,8,6),i%3?sand:sand2);m.scale.y=.12+Math.random()*.12;m.position.set((Math.random()-.5)*110,-.15,(Math.random()-.5)*100);m.receiveShadow=true;scene.add(m)}
+ function hill(x,z,sx,sy,sz,material){const m=new THREE.Mesh(new THREE.DodecahedronGeometry(1,1),material||rock);m.position.set(x,sy*.35,z);m.scale.set(sx,sy,sz);m.rotation.y=Math.random()*2;m.castShadow=true;m.receiveShadow=true;scene.add(m)}
+ for(let i=0;i<13;i++)hill(-48+i*7,-31-Math.random()*10,4+Math.random()*5,3+Math.random()*5,4+Math.random()*5,i%3?rock:darkrock);
+ for(let i=0;i<8;i++)hill(42+i*5,30+Math.random()*8,5,3+Math.random()*3,5,rock);
+ const well=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.7,.35,24),wood);well.position.set(-4,.2,-2);scene.add(well);
+ const pool=new THREE.Mesh(new THREE.CircleGeometry(1.75,24),water);pool.rotation.x=-Math.PI/2;pool.position.set(-4,.39,-2);scene.add(pool);
+ // Палатки, следы и костровые точки — художественные детали диорамы
+ function tent(x,z,scale=1,rotation=0){
+   const g=new THREE.Group(),fabric=mat(0xbca17b),dark=mat(0x72553b),pole=mat(0x493626);
+   const canopy=new THREE.Mesh(new THREE.ConeGeometry(2.5*scale,2.4*scale,4),fabric);
+   canopy.rotation.y=Math.PI/4;canopy.position.y=1.25*scale;canopy.scale.set(1.15,1,1);g.add(canopy);
+   const opening=new THREE.Mesh(new THREE.PlaneGeometry(.75*scale,1.15*scale),dark);
+   opening.position.set(0,.55*scale,1.48*scale);g.add(opening);
+   const post=new THREE.Mesh(new THREE.CylinderGeometry(.045*scale,.06*scale,2.3*scale,6),pole);post.position.y=1.1*scale;g.add(post);
+   g.position.set(x,0,z);g.rotation.y=rotation;g.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true}});scene.add(g);
+ }
+ tent(-15,-7,1.15,.3);tent(-23,-1,.9,-.4);tent(-12,17,.85,.7);tent(25,14,1.1,-.5);tent(32,4,.9,.2);
+ function track(x,z,length,angle){
+   const mark=new THREE.Mesh(new THREE.PlaneGeometry(.22,length),mat(0x9b744f));
+   mark.rotation.x=-Math.PI/2;mark.rotation.z=angle;mark.position.set(x,.025,z);scene.add(mark);
+ }
+ for(let i=0;i<7;i++)track(-8+i*.8,8+i*1.4,8,.35);
+ for(let i=0;i<6;i++)track(12+i*.7,-4-i*1.2,7,-.45);
+ // Мягкая пыль в лучах рассвета
+ const dustGeo=new THREE.BufferGeometry(),dustCount=260,dustPositions=[];
+ for(let i=0;i<dustCount;i++)dustPositions.push((Math.random()-.5)*95,1+Math.random()*15,(Math.random()-.5)*80);
+ dustGeo.setAttribute('position',new THREE.Float32BufferAttribute(dustPositions,3));
+ dust=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0xf0d2a5,size:.16,transparent:true,opacity:.42,depthWrite:false}));
+ scene.add(dust);
+
+ addLabel('Колодец (условный)',-4,4,-2,'#9bd5e5');addLabel('Мусульмане (схема)',-18,5,9,'#9ccaff');addLabel('Курайшиты (схема)',21,5,-9,'#ffb3a0');addLabel('Возвышенность',-34,8,-30,'#f1d3a0');
+ for(let i=0;i<42;i++)muslims.push(warrior(-23+Math.random()*12,4+Math.random()*18,blue,cloth,wood,.65+Math.random()*.3,Math.PI*.1));
+ for(let i=0;i<65;i++)quraysh.push(warrior(14+Math.random()*20,-15+Math.random()*25,red,cloth,wood,.65+Math.random()*.35,-Math.PI*.2));
+ initialMuslims=muslims.map(o=>o.position.clone());initialQuraysh=quraysh.map(o=>o.position.clone());
+ for(let i=0;i<8;i++){const g=new THREE.Group(),cm=mat(0xa47c4c),lm=mat(0x80603d);const body=new THREE.Mesh(new THREE.CapsuleGeometry(.55,.9,4,8),cm);body.rotation.z=Math.PI/2;body.position.y=.85;g.add(body);const neck=new THREE.Mesh(new THREE.CylinderGeometry(.15,.23,.9,7),cm);neck.position.set(.45,1.25,0);neck.rotation.z=-.35;g.add(neck);for(const dx of [-.35,.35])for(const dz of [-.25,.25]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.07,.09,.65,6),lm);leg.position.set(dx,.35,dz);g.add(leg)}g.position.set(-25+Math.random()*50,0,-20+Math.random()*42);scene.add(g)}
+ function arrow(from,to,color){const d=new THREE.Vector3(to[0]-from[0],0,to[1]-from[1]);const a=new THREE.ArrowHelper(d.clone().normalize(),new THREE.Vector3(from[0],.3,from[1]),d.length(),color,1.5,1);scene.add(a);arrows.push(a)}
+ arrow([-14,8],[2,4],0x4f82b4);arrow([19,-7],[4,-1],0xa84f3b);arrow([20,5],[3,3],0xa84f3b);
+}
+function resize(){if(!renderer||!camera)return;const w=Math.max(1,view.clientWidth),h=Math.max(1,view.clientHeight);camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h,false)}
+resetButton.addEventListener('click',()=>{if(camera&&controls){camera.position.set(30,26,38);controls.target.set(0,0,0);controls.update()}});
+topButton.addEventListener('click',()=>{if(camera&&controls){camera.position.set(0,68,.1);controls.target.set(0,0,0);controls.update()}});
+playButton.addEventListener('click',()=>{playing=!playing;playButton.textContent=playing?'Пауза движения':'Запустить движение';if(playing)help.textContent='Условное движение маркеров для наглядности — не точная историческая расстановка.';});
+labelsButton.addEventListener('click',()=>{labelsVisible=!labelsVisible;labels.forEach(x=>x.visible=labelsVisible);labelsButton.textContent=labelsVisible?'Скрыть подписи':'Показать подписи'});
+toggleButton.addEventListener('click',()=>{positionsVisible=!positionsVisible;[...muslims,...quraysh,...arrows].forEach(x=>x.visible=positionsVisible);toggleButton.textContent=positionsVisible?'Скрыть условные позиции':'Показать условные позиции'});
+function animate(){
+ requestAnimationFrame(animate);
+ if(controls)controls.update();
+ if(playing&&muslims.length&&quraysh.length){
+   unitProgress+=.0022;
+   const t=(Math.sin(unitProgress)+1)/2;
+   muslims.forEach((o,i)=>{const a=initialMuslims[i];o.position.x=a.x+Math.sin(unitProgress+i*.16)*.55;o.position.z=a.z+Math.cos(unitProgress+i*.12)*.35;});
+   quraysh.forEach((o,i)=>{const a=initialQuraysh[i];o.position.x=a.x-Math.sin(unitProgress+i*.13)*.65;o.position.z=a.z+Math.cos(unitProgress+i*.17)*.35;});
+ }
+ if(dust){dust.rotation.y+=.00035;dust.position.x=Math.sin(unitProgress*.2)*.8;}
+ if(renderer&&scene&&camera)renderer.render(scene,camera);
+}
+try{
+ if(!window.THREE)throw Error('Библиотека Three.js не загрузилась.');
+ if(!THREE.OrbitControls)throw Error('OrbitControls не загрузился.');
+ if(!view)throw Error('Не найден контейнер 3D-сцены (#view).');
+ buildScene();
+ if('ResizeObserver' in window)new ResizeObserver(resize).observe(view);else window.addEventListener('resize',resize);
+ resize();renderContent();help.textContent=stages[stage][1];animate();
+}catch(e){console.error('Ошибка запуска 3D-сцены:',e);showError(e&&e.message?e.message:String(e));help.textContent='3D-сцена не запустилась — подробность показана под сценой.';renderContent()}
+})();
+</script>
+</body>
+</html>
